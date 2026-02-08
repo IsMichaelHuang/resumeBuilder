@@ -9,8 +9,7 @@ A modular, DRY (Don't Repeat Yourself) LaTeX resume system with a **Monster Resu
 ```
 /resume/
 ├── README.md                     # This file
-├── QUICK_REFERENCE.md            # Cheat sheet for quick lookup
-├── APPLICATION_TRACKER.md        # Track your job applications
+├── build.sh                      # Build script to compile resume PDFs
 ├── .gitignore                    # Ignore build artifacts
 ├── preamble.tex                  # Shared LaTeX packages & formatting
 │
@@ -85,17 +84,20 @@ See [monster/README.md](monster/README.md) for details.
 ### 2. Compile the Resume
 
 ```bash
-# Navigate to the version you want
-cd versions/ai-ml
+# Build a specific version
+./build.sh ai-ml
+./build.sh fullstack
+./build.sh backend
+./build.sh general-swe
 
-# Compile to PDF
-pdflatex main.tex
+# Build all 4 tailored versions at once
+./build.sh all
 
-# Open the PDF
-open main.pdf
+# Build the monster (master) resume
+./build.sh monster
 ```
 
-**Output:** `main.pdf` in the same directory
+**Output:** `main.pdf` in the version's directory (e.g. `versions/ai-ml/main.pdf`)
 
 ### 3. Rename for Application
 
@@ -120,10 +122,7 @@ These files are used by **ALL versions**. Edit once, affects all:
 
 After editing shared files, recompile all versions:
 ```bash
-cd versions/ai-ml && pdflatex main.tex && cd ../..
-cd versions/fullstack && pdflatex main.tex && cd ../..
-cd versions/backend && pdflatex main.tex && cd ../..
-cd versions/general-swe && pdflatex main.tex && cd ../..
+./build.sh all
 ```
 
 ### Editing Version-Specific Content
@@ -136,8 +135,7 @@ These files are unique per version:
 
 After editing:
 ```bash
-cd versions/[version]
-pdflatex main.tex
+./build.sh [version]
 ```
 
 ---
@@ -234,5 +232,6 @@ export PATH="/Library/TeX/texbin:$PATH"
 
 ## Changelog
 
+- **2026-02-08**: Removed QUICK_REFERENCE.md and APPLICATION_TRACKER.md, added build.sh, recompiled all resume PDFs
 - **2026-02-07**: Added tailored summary sections per version, merged hackathon entries, removed GPA
 - **2026-02-01**: Initial modular system created with 4 versions
