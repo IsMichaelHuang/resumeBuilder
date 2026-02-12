@@ -102,9 +102,18 @@ See [monster/README.md](monster/README.md) for details.
 ### 3. Rename for Application
 
 ```bash
-# Copy with descriptive name
-cp main.pdf ~/Desktop/Michael_Huang_Resume_AI_ML.pdf
+# Copy to ~/Desktop with a descriptive name (default destination)
+./build.sh rename ai-ml
+
+# Copy to a custom directory
+./build.sh rename ai-ml ./applications/
+
+# Rename all 4 versions at once
+./build.sh rename all
+./build.sh rename all ./applications/
 ```
+
+Output filenames follow the pattern `Michael_Huang_Resume_[Version].pdf`.
 
 ---
 
