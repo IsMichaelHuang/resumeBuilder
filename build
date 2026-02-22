@@ -1,0 +1,263 @@
+#!/usr/bin/env python3
+"""Resume build script.
+
+Assembles version-specific sections (projects, skills) from shared LaTeX
+snippets and compiles each resume version with pdflatex.
+
+Usage::
+
+    python3 build.py all          # Build every tailored version
+    python3 build.py ai-ml        # Build a single version
+    python3 build.py monster      # Build the monster (master) resume
+
+Architecture:
+    - Reusable snippets live in ``sections/projects/`` and ``sections/skills/``.
+    - The ``VERSIONS`` dict maps each resume variant to its snippet selections.
+    - At build time the script reads the relevant snippets, wraps them in
+      LaTeX section boilerplate, writes the assembled ``.tex`` files into
+      each version directory, and invokes ``pdflatex`` via subprocess.
+    - The compiled PDF is renamed from ``main.pdf`` to
+      ``<NAME>_Resume_<Label>.pdf`` in-place.
+"""
+
+import subprocess
+import sys
+from pathlib import Path
+
+# --------------------------------------------------------------------------- #
+# Paths
+# --------------------------------------------------------------------------- #
+
+ROOT = Path(__file__).resolve().parent
+SECTIONS = ROOT / "sections"
+VERSIONS_DIR = ROOT / "versions"
+
+# --------------------------------------------------------------------------- #
+# Constants
+# --------------------------------------------------------------------------- #
+
+NAME = "Michael_Huang"
+"""Base name used when generating the output PDF filename."""
+
+# --------------------------------------------------------------------------- #
+# Version configs
+#
+# Each key is a directory name under ``versions/``.
+#   label    — display-friendly suffix for the output PDF filename.
+#   projects — ordered list of snippet names from ``sections/projects/``.
+#   skills   — ordered list of snippet names from ``sections/skills/``.
+# --------------------------------------------------------------------------- #
+
+VERSIONS: dict[str, dict] = {
+    "ai-ml": {
+        "label": "AI_ML",
+        "projects": ["axion", "sar"],
+        "skills": ["languages", "aiml", "web_dev", "tools"],
+    },
+    "fullstack": {
+        "label": "Full_Stack",
+        "projects": ["finance_dashboard", "linux_shell"],
+        "skills": ["languages", "frontend", "backend", "aiml", "tools"],
+    },
+    "backend": {
+        "label": "Backend",
+        "projects": ["linux_shell", "huffman"],
+        "skills": ["languages", "backend", "systems", "aiml", "tools"],
+    },
+    "general-swe": {
+        "label": "General_SWE",
+        "projects": ["finance_dashboard", "linux_shell"],
+        "skills": ["languages", "web_dev", "aiml", "tools"],
+    },
+}
+
+# --------------------------------------------------------------------------- #
+# Snippet helpers
+# --------------------------------------------------------------------------- #
+
+
+def read_snippet(subdir: str, name: str) -> str:
+    """Read a single ``.tex`` snippet from ``sections/<subdir>/<name>.tex``.
+
+    Args:
+        subdir: Sub-directory under ``sections/`` (e.g. ``"projects"``).
+        name:   Filename without extension (e.g. ``"axion"``).
+
+    Returns:
+        The raw text content of the snippet file.
+
+    Raises:
+        FileNotFoundError: If the snippet does not exist.
+    """
+    path = SECTIONS / subdir / f"{name}.tex"
+    return path.read_text()
+
+
+def assemble_projects(snippets: list[str]) -> str:
+    """Concatenate project snippets inside ``\\section{Projects}`` boilerplate.
+
+    Each snippet is expected to contain one or more
+    ``\\resumeProjectHeading`` blocks.  This function wraps them in
+    the shared section header and ``\\resumeSubHeadingListStart/End``
+    environment.
+
+    Args:
+        snippets: Ordered list of snippet names to include.
+
+    Returns:
+        A complete LaTeX ``\\section{Projects}`` string ready to be
+        written to a ``.tex`` file.
+    """
+    body = "\n".join(read_snippet("projects", s) for s in snippets)
+    return (
+        "%-----------PROJECTS-----------\n"
+        "\\section{Projects}\n"
+        "    \\resumeSubHeadingListStart\n"
+        f"{body}"
+        "    \\resumeSubHeadingListEnd\n"
+    )
+
+
+def assemble_skills(snippets: list[str]) -> str:
+    """Concatenate skill-category snippets inside ``\\section{Technical Skills}``.
+
+    Rows are joined with ``\\\\`` (LaTeX line breaks) so each category
+    appears on its own line within a single ``\\item`` block.
+
+    Args:
+        snippets: Ordered list of skill-category snippet names.
+
+    Returns:
+        A complete LaTeX ``\\section{Technical Skills}`` string.
+    """
+    rows = [read_snippet("skills", s).rstrip() for s in snippets]
+    body = " \\\\\n".join(rows) + "\n"
+    return (
+        "%-----------PROGRAMMING SKILLS-----------\n"
+        "\\section{Technical Skills}\n"
+        " \\begin{itemize}[leftmargin=0.15in, label={}]\n"
+        "    \\small{\n"
+        "        \\item{\n"
+        f"{body}"
+        "        }\n"
+        "    }\n"
+        " \\end{itemize}\n"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Build functions
+# --------------------------------------------------------------------------- #
+
+
+def build_version(version: str, config: dict) -> bool:
+    """Assemble sections and compile a single resume version.
+
+    Writes the generated ``projects.tex`` and ``skills.tex`` into the
+    version directory, runs ``pdflatex``, and renames the output PDF.
+
+    Args:
+        version: Directory name under ``versions/`` (e.g. ``"ai-ml"``).
+        config:  Entry from :data:`VERSIONS` containing ``label``,
+                 ``projects``, and ``skills`` keys.
+
+    Returns:
+        ``True`` if the build succeeded, ``False`` otherwise.
+    """
+    version_dir = VERSIONS_DIR / version
+
+    # Write assembled sections
+    (version_dir / "projects.tex").write_text(
+        assemble_projects(config["projects"])
+    )
+    (version_dir / "skills.tex").write_text(
+        assemble_skills(config["skills"])
+    )
+
+    # Compile
+    print(f"Building {version}...")
+    result = subprocess.run(
+        ["pdflatex", "-interaction=nonstopmode", "main.tex"],
+        cwd=version_dir,
+        capture_output=True,
+    )
+
+    if result.returncode != 0:
+        print(f"  Failed. Run manually: cd {version_dir} && pdflatex main.tex")
+        return False
+
+    # Rename output
+    label = config["label"]
+    named = f"{NAME}_Resume_{label}.pdf"
+    (version_dir / "main.pdf").rename(version_dir / named)
+    print(f"  Done: {version_dir / named}")
+    return True
+
+
+def build_monster() -> bool:
+    """Build the monster (master) resume.
+
+    The monster resume is a multi-page master document that includes all
+    experience, projects, and skills.  It does not use the snippet
+    assembly pipeline — it has its own self-contained ``.tex`` files.
+
+    Returns:
+        ``True`` if the build succeeded, ``False`` otherwise.
+    """
+    monster_dir = ROOT / "monster"
+    print("Building monster...")
+    result = subprocess.run(
+        ["pdflatex", "-interaction=nonstopmode", "main.tex"],
+        cwd=monster_dir,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        print(f"  Failed. Run manually: cd {monster_dir} && pdflatex main.tex")
+        return False
+
+    named = f"{NAME}_Resume_Monster.pdf"
+    (monster_dir / "main.pdf").rename(monster_dir / named)
+    print(f"  Done: {monster_dir / named}")
+    return True
+
+
+# --------------------------------------------------------------------------- #
+# CLI entry point
+# --------------------------------------------------------------------------- #
+
+
+def main() -> None:
+    """Parse CLI arguments and dispatch to the appropriate build function.
+
+    Exits with code 1 on invalid arguments or build failure.
+    """
+    if len(sys.argv) < 2:
+        versions_list = ", ".join(VERSIONS.keys())
+        print(f"Usage: python build.py <version|all|monster>")
+        print(f"Versions: {versions_list}")
+        sys.exit(1)
+
+    target = sys.argv[1]
+    failed = False
+
+    if target == "all":
+        for version, config in VERSIONS.items():
+            if not build_version(version, config):
+                failed = True
+    elif target == "monster":
+        if not build_monster():
+            failed = True
+    elif target in VERSIONS:
+        if not build_version(target, VERSIONS[target]):
+            failed = True
+    else:
+        print(f"Unknown version: {target}")
+        print(f"Available: {', '.join(VERSIONS.keys())}, all, monster")
+        sys.exit(1)
+
+    if failed:
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
