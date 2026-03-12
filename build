@@ -1,0 +1,318 @@
+#!/usr/bin/env python3
+"""Resume build script.
+
+Compiles tailored resume PDFs from shared LaTeX sections and version-specific
+summaries. Each resume version cherry-picks which project snippets to include,
+while all other sections (heading, education, experience, skills) are shared.
+
+Directory layout::
+
+    resume/
+    ├── build                    ← this script
+    ├── output/                  ← compiled PDFs land here
+    ├── monster/
+    │   └── main.tex             ← self-contained master resume (all content)
+    └── src/                     ← all LaTeX source material
+        ├── preamble.tex         ← shared packages and custom commands
+        ├── sections/
+        │   ├── heading.tex      ← name, contact info, links
+        │   ├── education.tex    ← degrees and coursework
+        │   ├── experience.tex   ← professional experience entries
+        │   ├── skills.tex       ← technical skills (shared across all versions)
+        │   └── projects/
+        │       ├── axion.tex    ← individual project snippet
+        │       ├── sar.tex
+        │       ├── finance_dashboard.tex
+        │       └── linux_shell.tex
+        └── versions/
+            ├── ai-ml/
+            │   └── summary.tex  ← AI/ML-tailored summary blurb
+            └── fullstack/
+                └── summary.tex  ← full-stack-tailored summary blurb
+
+Build pipeline (per version):
+    1. Read the version's summary.tex and all shared sections.
+    2. Read and wrap the selected project snippets in LaTeX boilerplate.
+    3. Assemble everything into a single main.tex.
+    4. Write main.tex into the version directory and run pdflatex.
+    5. Move the compiled PDF to output/ and clean up build artifacts.
+
+The monster resume has its own self-contained main.tex and skips the
+assembly pipeline — it is compiled directly and its PDF is moved to output/.
+
+Usage::
+
+    python3 build all          # Build every tailored version
+    python3 build ai-ml        # Build a single version
+    python3 build monster      # Build the monster (master) resume
+"""
+
+import subprocess
+import sys
+from pathlib import Path
+
+# --------------------------------------------------------------------------- #
+# Paths
+# --------------------------------------------------------------------------- #
+
+ROOT = Path(__file__).resolve().parent
+SRC = ROOT / "src"
+SECTIONS = SRC / "sections"
+VERSIONS_DIR = SRC / "versions"
+OUTPUT_DIR = ROOT / "output"
+
+# --------------------------------------------------------------------------- #
+# Constants
+# --------------------------------------------------------------------------- #
+
+NAME = "Michael_Huang"
+"""Base name for output PDFs. Used to produce filenames like
+``Michael_Huang_Resume_AI_ML.pdf``."""
+
+# --------------------------------------------------------------------------- #
+# Version configs
+#
+# Each entry maps a directory name under versions/ to its configuration:
+#
+#   label    — human-readable suffix appended to the output PDF filename.
+#              e.g. "AI_ML" -> Michael_Huang_Resume_AI_ML.pdf
+#
+#   projects — ordered list of project snippet filenames (without .tex)
+#              from sections/projects/. These get wrapped in a LaTeX
+#              \section{Projects} block. An empty list omits the section.
+# --------------------------------------------------------------------------- #
+
+# --------------------------------------------------------------------------- #
+# Section order
+#
+# Controls the order of sections in the compiled resume. Reorder, comment
+# out, or add entries to change what appears and where.
+#
+# Each entry is one of:
+#   - "summary"   → version-specific, read from versions/<version>/summary.tex
+#   - "projects"  → version-specific, assembled from the version's project list
+#   - any other   → shared section, read from sections/<name>.tex
+# --------------------------------------------------------------------------- #
+
+SECTION_ORDER: list[str] = [
+    "heading",
+    "summary",
+    "education",
+    "experience",
+    "projects",
+    "skills",
+]
+
+# --------------------------------------------------------------------------- #
+# Version configs
+
+VERSIONS: dict[str, dict] = {
+    "ai-ml": {
+        "label": "AI_ML",
+        "projects": [],
+    },
+    "fullstack": {
+        "label": "Full_Stack",
+        "projects": ["finance_dashboard", "linux_shell"],
+    },
+}
+
+# --------------------------------------------------------------------------- #
+# Assembly helpers
+#
+# These functions read .tex snippet files from disk and concatenate them
+# into complete LaTeX sections. The final assemble_main() produces a full
+# document ready for pdflatex.
+# --------------------------------------------------------------------------- #
+
+
+def read_section(name: str) -> str:
+    """Return the contents of sections/<name>.tex."""
+    return (SECTIONS / f"{name}.tex").read_text()
+
+
+def read_project(name: str) -> str:
+    """Return the contents of sections/projects/<name>.tex."""
+    return (SECTIONS / "projects" / f"{name}.tex").read_text()
+
+
+def assemble_projects(snippets: list[str]) -> str:
+    """Wrap project snippets in \\section{Projects} boilerplate.
+
+    Returns an empty string when *snippets* is empty so the Projects
+    section is omitted entirely from that version's resume.
+    """
+    if not snippets:
+        return ""
+    body = "\n".join(read_project(s) for s in snippets)
+    return (
+        "%-----------PROJECTS-----------\n"
+        "\\section{Projects}\n"
+        "    \\resumeSubHeadingListStart\n"
+        f"{body}"
+        "    \\resumeSubHeadingListEnd\n"
+    )
+
+
+def assemble_main(version_dir: Path, config: dict) -> str:
+    """Produce a complete main.tex by iterating SECTION_ORDER.
+
+    For each entry in SECTION_ORDER:
+        - "summary"  → reads the version's summary.tex
+        - "projects" → assembles the version's project snippets
+        - anything else → reads the shared sections/<name>.tex
+
+    The only external dependency is \\input{../../preamble}, which loads
+    shared packages and custom LaTeX commands.
+    """
+    parts = []
+    for section in SECTION_ORDER:
+        match section:
+            case "summary":
+                parts.append((version_dir / "summary.tex").read_text())
+            case "projects":
+                parts.append(assemble_projects(config["projects"]))
+            case _:
+                parts.append(read_section(section))
+
+    body = "\n".join(parts)
+
+    return (
+        "\\documentclass[letterpaper,11pt]{article}\n"
+        "\n"
+        "% Load all packages and custom commands\n"
+        "\\input{../../preamble}\n"
+        "\n"
+        "\\begin{document}\n"
+        "\n"
+        f"{body}\n"
+        "\n"
+        "\\end{document}\n"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Build functions
+# --------------------------------------------------------------------------- #
+
+
+def build_version(version: str, config: dict) -> bool:
+    """Assemble and compile a single resume version.
+
+    Steps:
+        1. Generate main.tex from shared sections + version summary.
+        2. Run pdflatex in the version directory.
+        3. Move the resulting PDF to output/.
+        4. Delete all build artifacts (main.tex, .aux, .log, .out)
+           so the version directory stays clean.
+
+    Returns True on success, False on compilation failure.
+    """
+    version_dir = VERSIONS_DIR / version
+    OUTPUT_DIR.mkdir(exist_ok=True)
+
+    # Step 1: Assemble main.tex
+    (version_dir / "main.tex").write_text(
+        assemble_main(version_dir, config)
+    )
+
+    # Step 2: Compile
+    print(f"Building {version}...")
+    result = subprocess.run(
+        ["pdflatex", "-interaction=nonstopmode", "main.tex"],
+        cwd=version_dir,
+        capture_output=True,
+    )
+
+    if result.returncode != 0:
+        print(f"  Failed. Run manually: cd {version_dir} && pdflatex main.tex")
+        return False
+
+    # Step 3: Move PDF to output/
+    label = config["label"]
+    named = f"{NAME}_Resume_{label}.pdf"
+    (version_dir / "main.pdf").rename(OUTPUT_DIR / named)
+
+    # Step 4: Clean up build artifacts
+    for ext in ("main.tex", "main.aux", "main.log", "main.out"):
+        (version_dir / ext).unlink(missing_ok=True)
+
+    print(f"  Done: {OUTPUT_DIR / named}")
+    return True
+
+
+def build_monster() -> bool:
+    """Compile the monster (master) resume.
+
+    The monster resume is a multi-page document containing all experience,
+    projects, and skills. It has its own self-contained main.tex and does
+    not go through the assembly pipeline.
+
+    The compiled PDF is moved to output/.
+
+    Returns True on success, False on compilation failure.
+    """
+    monster_dir = ROOT / "monster"
+    OUTPUT_DIR.mkdir(exist_ok=True)
+
+    print("Building monster...")
+    result = subprocess.run(
+        ["pdflatex", "-interaction=nonstopmode", "main.tex"],
+        cwd=monster_dir,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        print(f"  Failed. Run manually: cd {monster_dir} && pdflatex main.tex")
+        return False
+
+    named = f"{NAME}_Resume_Monster.pdf"
+    (monster_dir / "main.pdf").rename(OUTPUT_DIR / named)
+    print(f"  Done: {OUTPUT_DIR / named}")
+    return True
+
+
+# --------------------------------------------------------------------------- #
+# CLI entry point
+# --------------------------------------------------------------------------- #
+
+
+def main() -> None:
+    """Parse the CLI argument and dispatch to the appropriate build function.
+
+    Accepts one positional argument:
+        <version>  — build a specific version (e.g. "ai-ml", "fullstack")
+        all        — build every version defined in VERSIONS
+        monster    — build the monster (master) resume
+
+    Exits with code 1 on unknown arguments or any build failure.
+    """
+    if len(sys.argv) < 2:
+        versions_list = ", ".join(VERSIONS.keys())
+        print(f"Usage: python build.py <version|all|monster>")
+        print(f"Versions: {versions_list}")
+        sys.exit(1)
+
+    target = sys.argv[1]
+    failed = False
+
+    if target == "all":
+        for version, config in VERSIONS.items():
+            if not build_version(version, config):
+                failed = True
+    elif target == "monster":
+        if not build_monster():
+            failed = True
+    elif target in VERSIONS:
+        if not build_version(target, VERSIONS[target]):
+            failed = True
+    else:
+        print(f"Unknown version: {target}")
+        print(f"Available: {', '.join(VERSIONS.keys())}, all, monster")
+        sys.exit(1)
+
+    if failed:
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
