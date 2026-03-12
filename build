@@ -60,13 +60,51 @@ SRC = ROOT / "src"
 SECTIONS = SRC / "sections"
 VERSIONS_DIR = SRC / "versions"
 OUTPUT_DIR = ROOT / "output"
+ENV_FILE = ROOT / ".env"
 
 # --------------------------------------------------------------------------- #
-# Constants
+# Environment loading
+#
+# Personal info (name, email, phone, etc.) is stored in ``.env`` at the
+# project root and injected into LaTeX templates at build time. This keeps
+# private data out of version control.
+#
+# Templates use ``{{KEY}}`` placeholders (e.g. ``{{FULL_NAME}}``) which
+# are replaced with the corresponding value from ``.env``.
 # --------------------------------------------------------------------------- #
 
-NAME = "Michael_Huang"
-"""Base name for output PDFs. Used to produce filenames like
+
+def load_env(path: Path) -> dict[str, str]:
+    """Parse a .env file into a dict of key-value pairs.
+
+    Skips blank lines and comments (lines starting with #).
+    Values are stripped of surrounding whitespace but otherwise kept as-is.
+    """
+    env = {}
+    if not path.exists():
+        print(f"Error: {path} not found. Copy .env.example to .env and fill in your info.")
+        sys.exit(1)
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, _, value = line.partition("=")
+        env[key.strip()] = value.strip()
+    return env
+
+
+def inject_env(text: str, env: dict[str, str]) -> str:
+    """Replace all ``{{KEY}}`` placeholders in *text* with values from *env*."""
+    for key, value in env.items():
+        text = text.replace(f"{{{{{key}}}}}", value)
+    return text
+
+
+ENV: dict[str, str] = {}
+"""Loaded environment variables from .env, populated at startup."""
+
+NAME: str = "Resume"
+"""Base name for output PDFs, derived from .env. Produces filenames like
 ``Michael_Huang_Resume_AI_ML.pdf``."""
 
 # --------------------------------------------------------------------------- #
@@ -177,7 +215,7 @@ def assemble_main(version_dir: Path, config: dict) -> str:
 
     body = "\n".join(parts)
 
-    return (
+    document = (
         "\\documentclass[letterpaper,11pt]{article}\n"
         "\n"
         "% Load all packages and custom commands\n"
@@ -189,6 +227,9 @@ def assemble_main(version_dir: Path, config: dict) -> str:
         "\n"
         "\\end{document}\n"
     )
+
+    # Inject .env values into {{PLACEHOLDER}} tokens
+    return inject_env(document, ENV)
 
 
 # --------------------------------------------------------------------------- #
@@ -286,6 +327,10 @@ def main() -> None:
 
     Exits with code 1 on unknown arguments or any build failure.
     """
+    global ENV, NAME
+    ENV = load_env(ENV_FILE)
+    NAME = ENV.get("FULL_NAME_UNDERSCORE", "Resume")
+
     if len(sys.argv) < 2:
         versions_list = ", ".join(VERSIONS.keys())
         print(f"Usage: python build.py <version|all|monster>")

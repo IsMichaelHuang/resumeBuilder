@@ -24,6 +24,9 @@
 .vscode/
 .idea/
 
+# Private info
+.env
+
 # Compiled PDFs
 output/
 *.pdf
