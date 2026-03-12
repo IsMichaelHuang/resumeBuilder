@@ -82,6 +82,30 @@ NAME = "Michael_Huang"
 #              \section{Projects} block. An empty list omits the section.
 # --------------------------------------------------------------------------- #
 
+# --------------------------------------------------------------------------- #
+# Section order
+#
+# Controls the order of sections in the compiled resume. Reorder, comment
+# out, or add entries to change what appears and where.
+#
+# Each entry is one of:
+#   - "summary"   → version-specific, read from versions/<version>/summary.tex
+#   - "projects"  → version-specific, assembled from the version's project list
+#   - any other   → shared section, read from sections/<name>.tex
+# --------------------------------------------------------------------------- #
+
+SECTION_ORDER: list[str] = [
+    "heading",
+    "summary",
+    "education",
+    "experience",
+    "projects",
+    "skills",
+]
+
+# --------------------------------------------------------------------------- #
+# Version configs
+
 VERSIONS: dict[str, dict] = {
     "ai-ml": {
         "label": "AI_ML",
@@ -131,19 +155,27 @@ def assemble_projects(snippets: list[str]) -> str:
 
 
 def assemble_main(version_dir: Path, config: dict) -> str:
-    """Produce a complete main.tex by inlining every section.
+    """Produce a complete main.tex by iterating SECTION_ORDER.
 
-    The only external dependency left is \\input{../../preamble}, which
-    loads shared packages and custom LaTeX commands. Everything else —
-    heading, summary, education, experience, projects, skills — is
-    inlined so the compiled document is self-contained.
+    For each entry in SECTION_ORDER:
+        - "summary"  → reads the version's summary.tex
+        - "projects" → assembles the version's project snippets
+        - anything else → reads the shared sections/<name>.tex
+
+    The only external dependency is \\input{../../preamble}, which loads
+    shared packages and custom LaTeX commands.
     """
-    summary = (version_dir / "summary.tex").read_text()
-    heading = read_section("heading")
-    education = read_section("education")
-    experience = read_section("experience")
-    skills = read_section("skills")
-    projects = assemble_projects(config["projects"])
+    parts = []
+    for section in SECTION_ORDER:
+        match section:
+            case "summary":
+                parts.append((version_dir / "summary.tex").read_text())
+            case "projects":
+                parts.append(assemble_projects(config["projects"]))
+            case _:
+                parts.append(read_section(section))
+
+    body = "\n".join(parts)
 
     return (
         "\\documentclass[letterpaper,11pt]{article}\n"
@@ -153,12 +185,8 @@ def assemble_main(version_dir: Path, config: dict) -> str:
         "\n"
         "\\begin{document}\n"
         "\n"
-        f"{heading}\n"
-        f"{summary}\n"
-        f"{education}\n"
-        f"{experience}\n"
-        f"{projects}\n"
-        f"{skills}\n"
+        f"{body}\n"
+        "\n"
         "\\end{document}\n"
     )
 
