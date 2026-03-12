@@ -24,5 +24,6 @@
 .vscode/
 .idea/
 
-# Keep PDFs in versions but ignore elsewhere
-/*.pdf
+# Compiled PDFs
+output/
+*.pdf
