@@ -9,25 +9,26 @@ Directory layout::
 
     resume/
     ├── build                    ← this script
-    ├── preamble.tex             ← shared LaTeX packages and custom commands
-    ├── sections/
-    │   ├── heading.tex          ← name, contact info, links
-    │   ├── education.tex        ← degrees and coursework
-    │   ├── experience.tex       ← professional experience entries
-    │   ├── skills.tex           ← technical skills (shared across all versions)
-    │   └── projects/
-    │       ├── axion.tex        ← individual project snippet
-    │       ├── sar.tex
-    │       ├── finance_dashboard.tex
-    │       └── linux_shell.tex
-    ├── versions/
-    │   ├── ai-ml/
-    │   │   └── summary.tex      ← AI/ML-tailored summary blurb
-    │   └── fullstack/
-    │       └── summary.tex      ← full-stack-tailored summary blurb
+    ├── output/                  ← compiled PDFs land here
     ├── monster/
     │   └── main.tex             ← self-contained master resume (all content)
-    └── output/                  ← compiled PDFs land here
+    └── src/                     ← all LaTeX source material
+        ├── preamble.tex         ← shared packages and custom commands
+        ├── sections/
+        │   ├── heading.tex      ← name, contact info, links
+        │   ├── education.tex    ← degrees and coursework
+        │   ├── experience.tex   ← professional experience entries
+        │   ├── skills.tex       ← technical skills (shared across all versions)
+        │   └── projects/
+        │       ├── axion.tex    ← individual project snippet
+        │       ├── sar.tex
+        │       ├── finance_dashboard.tex
+        │       └── linux_shell.tex
+        └── versions/
+            ├── ai-ml/
+            │   └── summary.tex  ← AI/ML-tailored summary blurb
+            └── fullstack/
+                └── summary.tex  ← full-stack-tailored summary blurb
 
 Build pipeline (per version):
     1. Read the version's summary.tex and all shared sections.
@@ -55,8 +56,9 @@ from pathlib import Path
 # --------------------------------------------------------------------------- #
 
 ROOT = Path(__file__).resolve().parent
-SECTIONS = ROOT / "sections"
-VERSIONS_DIR = ROOT / "versions"
+SRC = ROOT / "src"
+SECTIONS = SRC / "sections"
+VERSIONS_DIR = SRC / "versions"
 OUTPUT_DIR = ROOT / "output"
 
 # --------------------------------------------------------------------------- #
