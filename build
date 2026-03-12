@@ -100,10 +100,10 @@ def inject_env(text: str, env: dict[str, str]) -> str:
     return text
 
 
-ENV = load_env(ENV_FILE)
-"""Loaded environment variables from .env, used for template injection."""
+ENV: dict[str, str] = {}
+"""Loaded environment variables from .env, populated at startup."""
 
-NAME = ENV.get("FULL_NAME_UNDERSCORE", "Resume")
+NAME: str = "Resume"
 """Base name for output PDFs, derived from .env. Produces filenames like
 ``Michael_Huang_Resume_AI_ML.pdf``."""
 
@@ -327,6 +327,10 @@ def main() -> None:
 
     Exits with code 1 on unknown arguments or any build failure.
     """
+    global ENV, NAME
+    ENV = load_env(ENV_FILE)
+    NAME = ENV.get("FULL_NAME_UNDERSCORE", "Resume")
+
     if len(sys.argv) < 2:
         versions_list = ", ".join(VERSIONS.keys())
         print(f"Usage: python build.py <version|all|monster>")

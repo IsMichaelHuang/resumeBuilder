@@ -9,8 +9,12 @@ A modular LaTeX resume system with a Python build pipeline. Assembles tailored 1
 ```
 resume/
 ├── build                        # Python build script (assembles + compiles)
+├── .env                         # Personal info (gitignored)
+├── .env.example                 # Template for .env
 ├── .gitignore
 ├── output/                      # Compiled PDFs land here (gitignored)
+├── tests/
+│   └── test_build.py            # Test suite (pytest)
 ├── monster/                     # Self-contained master resume (all content)
 │   └── main.tex
 └── src/                         # All LaTeX source material
@@ -49,6 +53,14 @@ resume/
 ### Prerequisites
 - **Python 3.10+**
 - **pdflatex** (via [MacTeX](https://www.tug.org/mactex/): `brew install --cask mactex`)
+- **pytest** (for tests): `pip3 install pytest`
+
+### Setup
+
+```bash
+cp .env.example .env
+# Edit .env with your personal info (name, email, phone, etc.)
+```
 
 ### Build
 
@@ -108,6 +120,16 @@ Edit the `SECTION_ORDER` list in `build`. Move, add, or comment out entries.
 The monster resume at `monster/` is a multi-page master document containing all experience, projects, and skills. It has its own self-contained `main.tex` and skips the assembly pipeline.
 
 **Workflow:** Update the monster first when adding new experience, then create snippets in `src/sections/` for the tailored versions.
+
+---
+
+## Testing
+
+```bash
+python3 -m pytest tests/ -v
+```
+
+33 tests covering env loading, template injection, snippet reading, project assembly, document assembly, config integrity, and heading placeholders.
 
 ---
 
