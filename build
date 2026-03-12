@@ -1,23 +1,49 @@
 #!/usr/bin/env python3
 """Resume build script.
 
-Assembles version-specific sections (projects, skills) from shared LaTeX
-snippets and compiles each resume version with pdflatex.
+Compiles tailored resume PDFs from shared LaTeX sections and version-specific
+summaries. Each resume version cherry-picks which project snippets to include,
+while all other sections (heading, education, experience, skills) are shared.
+
+Directory layout::
+
+    resume/
+    ├── build                    ← this script
+    ├── preamble.tex             ← shared LaTeX packages and custom commands
+    ├── sections/
+    │   ├── heading.tex          ← name, contact info, links
+    │   ├── education.tex        ← degrees and coursework
+    │   ├── experience.tex       ← professional experience entries
+    │   ├── skills.tex           ← technical skills (shared across all versions)
+    │   └── projects/
+    │       ├── axion.tex        ← individual project snippet
+    │       ├── sar.tex
+    │       ├── finance_dashboard.tex
+    │       └── linux_shell.tex
+    ├── versions/
+    │   ├── ai-ml/
+    │   │   └── summary.tex      ← AI/ML-tailored summary blurb
+    │   └── fullstack/
+    │       └── summary.tex      ← full-stack-tailored summary blurb
+    ├── monster/
+    │   └── main.tex             ← self-contained master resume (all content)
+    └── output/                  ← compiled PDFs land here
+
+Build pipeline (per version):
+    1. Read the version's summary.tex and all shared sections.
+    2. Read and wrap the selected project snippets in LaTeX boilerplate.
+    3. Assemble everything into a single main.tex.
+    4. Write main.tex into the version directory and run pdflatex.
+    5. Move the compiled PDF to output/ and clean up build artifacts.
+
+The monster resume has its own self-contained main.tex and skips the
+assembly pipeline — it is compiled directly and its PDF is moved to output/.
 
 Usage::
 
-    python3 build.py all          # Build every tailored version
-    python3 build.py ai-ml        # Build a single version
-    python3 build.py monster      # Build the monster (master) resume
-
-Architecture:
-    - Reusable snippets live in ``sections/projects/`` and ``sections/skills/``.
-    - The ``VERSIONS`` dict maps each resume variant to its snippet selections.
-    - At build time the script reads the relevant snippets, wraps them in
-      LaTeX section boilerplate, writes the assembled ``.tex`` files into
-      each version directory, and invokes ``pdflatex`` via subprocess.
-    - The compiled PDF is renamed from ``main.pdf`` to
-      ``<NAME>_Resume_<Label>.pdf`` in-place.
+    python3 build all          # Build every tailored version
+    python3 build ai-ml        # Build a single version
+    python3 build monster      # Build the monster (master) resume
 """
 
 import subprocess
@@ -31,84 +57,68 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 SECTIONS = ROOT / "sections"
 VERSIONS_DIR = ROOT / "versions"
+OUTPUT_DIR = ROOT / "output"
 
 # --------------------------------------------------------------------------- #
 # Constants
 # --------------------------------------------------------------------------- #
 
 NAME = "Michael_Huang"
-"""Base name used when generating the output PDF filename."""
+"""Base name for output PDFs. Used to produce filenames like
+``Michael_Huang_Resume_AI_ML.pdf``."""
 
 # --------------------------------------------------------------------------- #
 # Version configs
 #
-# Each key is a directory name under ``versions/``.
-#   label    — display-friendly suffix for the output PDF filename.
-#   projects — ordered list of snippet names from ``sections/projects/``.
-#   skills   — ordered list of snippet names from ``sections/skills/``.
+# Each entry maps a directory name under versions/ to its configuration:
+#
+#   label    — human-readable suffix appended to the output PDF filename.
+#              e.g. "AI_ML" -> Michael_Huang_Resume_AI_ML.pdf
+#
+#   projects — ordered list of project snippet filenames (without .tex)
+#              from sections/projects/. These get wrapped in a LaTeX
+#              \section{Projects} block. An empty list omits the section.
 # --------------------------------------------------------------------------- #
 
 VERSIONS: dict[str, dict] = {
     "ai-ml": {
         "label": "AI_ML",
-        "projects": ["axion", "sar"],
-        "skills": ["languages", "aiml", "web_dev", "tools"],
+        "projects": [],
     },
     "fullstack": {
         "label": "Full_Stack",
         "projects": ["finance_dashboard", "linux_shell"],
-        "skills": ["languages", "frontend", "backend", "aiml", "tools"],
-    },
-    "backend": {
-        "label": "Backend",
-        "projects": ["linux_shell", "huffman"],
-        "skills": ["languages", "backend", "systems", "aiml", "tools"],
-    },
-    "general-swe": {
-        "label": "General_SWE",
-        "projects": ["finance_dashboard", "linux_shell"],
-        "skills": ["languages", "web_dev", "aiml", "tools"],
     },
 }
 
 # --------------------------------------------------------------------------- #
-# Snippet helpers
+# Assembly helpers
+#
+# These functions read .tex snippet files from disk and concatenate them
+# into complete LaTeX sections. The final assemble_main() produces a full
+# document ready for pdflatex.
 # --------------------------------------------------------------------------- #
 
 
-def read_snippet(subdir: str, name: str) -> str:
-    """Read a single ``.tex`` snippet from ``sections/<subdir>/<name>.tex``.
+def read_section(name: str) -> str:
+    """Return the contents of sections/<name>.tex."""
+    return (SECTIONS / f"{name}.tex").read_text()
 
-    Args:
-        subdir: Sub-directory under ``sections/`` (e.g. ``"projects"``).
-        name:   Filename without extension (e.g. ``"axion"``).
 
-    Returns:
-        The raw text content of the snippet file.
-
-    Raises:
-        FileNotFoundError: If the snippet does not exist.
-    """
-    path = SECTIONS / subdir / f"{name}.tex"
-    return path.read_text()
+def read_project(name: str) -> str:
+    """Return the contents of sections/projects/<name>.tex."""
+    return (SECTIONS / "projects" / f"{name}.tex").read_text()
 
 
 def assemble_projects(snippets: list[str]) -> str:
-    """Concatenate project snippets inside ``\\section{Projects}`` boilerplate.
+    """Wrap project snippets in \\section{Projects} boilerplate.
 
-    Each snippet is expected to contain one or more
-    ``\\resumeProjectHeading`` blocks.  This function wraps them in
-    the shared section header and ``\\resumeSubHeadingListStart/End``
-    environment.
-
-    Args:
-        snippets: Ordered list of snippet names to include.
-
-    Returns:
-        A complete LaTeX ``\\section{Projects}`` string ready to be
-        written to a ``.tex`` file.
+    Returns an empty string when *snippets* is empty so the Projects
+    section is omitted entirely from that version's resume.
     """
-    body = "\n".join(read_snippet("projects", s) for s in snippets)
+    if not snippets:
+        return ""
+    body = "\n".join(read_project(s) for s in snippets)
     return (
         "%-----------PROJECTS-----------\n"
         "\\section{Projects}\n"
@@ -118,30 +128,36 @@ def assemble_projects(snippets: list[str]) -> str:
     )
 
 
-def assemble_skills(snippets: list[str]) -> str:
-    """Concatenate skill-category snippets inside ``\\section{Technical Skills}``.
+def assemble_main(version_dir: Path, config: dict) -> str:
+    """Produce a complete main.tex by inlining every section.
 
-    Rows are joined with ``\\\\`` (LaTeX line breaks) so each category
-    appears on its own line within a single ``\\item`` block.
-
-    Args:
-        snippets: Ordered list of skill-category snippet names.
-
-    Returns:
-        A complete LaTeX ``\\section{Technical Skills}`` string.
+    The only external dependency left is \\input{../../preamble}, which
+    loads shared packages and custom LaTeX commands. Everything else —
+    heading, summary, education, experience, projects, skills — is
+    inlined so the compiled document is self-contained.
     """
-    rows = [read_snippet("skills", s).rstrip() for s in snippets]
-    body = " \\\\\n".join(rows) + "\n"
+    summary = (version_dir / "summary.tex").read_text()
+    heading = read_section("heading")
+    education = read_section("education")
+    experience = read_section("experience")
+    skills = read_section("skills")
+    projects = assemble_projects(config["projects"])
+
     return (
-        "%-----------PROGRAMMING SKILLS-----------\n"
-        "\\section{Technical Skills}\n"
-        " \\begin{itemize}[leftmargin=0.15in, label={}]\n"
-        "    \\small{\n"
-        "        \\item{\n"
-        f"{body}"
-        "        }\n"
-        "    }\n"
-        " \\end{itemize}\n"
+        "\\documentclass[letterpaper,11pt]{article}\n"
+        "\n"
+        "% Load all packages and custom commands\n"
+        "\\input{../../preamble}\n"
+        "\n"
+        "\\begin{document}\n"
+        "\n"
+        f"{heading}\n"
+        f"{summary}\n"
+        f"{education}\n"
+        f"{experience}\n"
+        f"{projects}\n"
+        f"{skills}\n"
+        "\\end{document}\n"
     )
 
 
@@ -151,30 +167,26 @@ def assemble_skills(snippets: list[str]) -> str:
 
 
 def build_version(version: str, config: dict) -> bool:
-    """Assemble sections and compile a single resume version.
+    """Assemble and compile a single resume version.
 
-    Writes the generated ``projects.tex`` and ``skills.tex`` into the
-    version directory, runs ``pdflatex``, and renames the output PDF.
+    Steps:
+        1. Generate main.tex from shared sections + version summary.
+        2. Run pdflatex in the version directory.
+        3. Move the resulting PDF to output/.
+        4. Delete all build artifacts (main.tex, .aux, .log, .out)
+           so the version directory stays clean.
 
-    Args:
-        version: Directory name under ``versions/`` (e.g. ``"ai-ml"``).
-        config:  Entry from :data:`VERSIONS` containing ``label``,
-                 ``projects``, and ``skills`` keys.
-
-    Returns:
-        ``True`` if the build succeeded, ``False`` otherwise.
+    Returns True on success, False on compilation failure.
     """
     version_dir = VERSIONS_DIR / version
+    OUTPUT_DIR.mkdir(exist_ok=True)
 
-    # Write assembled sections
-    (version_dir / "projects.tex").write_text(
-        assemble_projects(config["projects"])
-    )
-    (version_dir / "skills.tex").write_text(
-        assemble_skills(config["skills"])
+    # Step 1: Assemble main.tex
+    (version_dir / "main.tex").write_text(
+        assemble_main(version_dir, config)
     )
 
-    # Compile
+    # Step 2: Compile
     print(f"Building {version}...")
     result = subprocess.run(
         ["pdflatex", "-interaction=nonstopmode", "main.tex"],
@@ -186,25 +198,33 @@ def build_version(version: str, config: dict) -> bool:
         print(f"  Failed. Run manually: cd {version_dir} && pdflatex main.tex")
         return False
 
-    # Rename output
+    # Step 3: Move PDF to output/
     label = config["label"]
     named = f"{NAME}_Resume_{label}.pdf"
-    (version_dir / "main.pdf").rename(version_dir / named)
-    print(f"  Done: {version_dir / named}")
+    (version_dir / "main.pdf").rename(OUTPUT_DIR / named)
+
+    # Step 4: Clean up build artifacts
+    for ext in ("main.tex", "main.aux", "main.log", "main.out"):
+        (version_dir / ext).unlink(missing_ok=True)
+
+    print(f"  Done: {OUTPUT_DIR / named}")
     return True
 
 
 def build_monster() -> bool:
-    """Build the monster (master) resume.
+    """Compile the monster (master) resume.
 
-    The monster resume is a multi-page master document that includes all
-    experience, projects, and skills.  It does not use the snippet
-    assembly pipeline — it has its own self-contained ``.tex`` files.
+    The monster resume is a multi-page document containing all experience,
+    projects, and skills. It has its own self-contained main.tex and does
+    not go through the assembly pipeline.
 
-    Returns:
-        ``True`` if the build succeeded, ``False`` otherwise.
+    The compiled PDF is moved to output/.
+
+    Returns True on success, False on compilation failure.
     """
     monster_dir = ROOT / "monster"
+    OUTPUT_DIR.mkdir(exist_ok=True)
+
     print("Building monster...")
     result = subprocess.run(
         ["pdflatex", "-interaction=nonstopmode", "main.tex"],
@@ -216,8 +236,8 @@ def build_monster() -> bool:
         return False
 
     named = f"{NAME}_Resume_Monster.pdf"
-    (monster_dir / "main.pdf").rename(monster_dir / named)
-    print(f"  Done: {monster_dir / named}")
+    (monster_dir / "main.pdf").rename(OUTPUT_DIR / named)
+    print(f"  Done: {OUTPUT_DIR / named}")
     return True
 
 
@@ -227,9 +247,14 @@ def build_monster() -> bool:
 
 
 def main() -> None:
-    """Parse CLI arguments and dispatch to the appropriate build function.
+    """Parse the CLI argument and dispatch to the appropriate build function.
 
-    Exits with code 1 on invalid arguments or build failure.
+    Accepts one positional argument:
+        <version>  — build a specific version (e.g. "ai-ml", "fullstack")
+        all        — build every version defined in VERSIONS
+        monster    — build the monster (master) resume
+
+    Exits with code 1 on unknown arguments or any build failure.
     """
     if len(sys.argv) < 2:
         versions_list = ", ".join(VERSIONS.keys())
