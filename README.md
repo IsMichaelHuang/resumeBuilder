@@ -12,6 +12,7 @@ resume/
 ├── .env                         # Personal info (gitignored)
 ├── .env.example                 # Template for .env
 ├── .gitignore
+├── job_run.sh                   # Opens LinkedIn and GitHub tabs in Chrome
 ├── output/                      # Compiled PDFs land here (gitignored)
 ├── tests/
 │   └── test_build.py            # Test suite (pytest)
@@ -84,6 +85,16 @@ Output lands in `output/` as `Michael_Huang_Resume_<Label>.pdf`.
 |------------------------|------------------|
 | AI, ML, LLM, PyTorch, Deep Learning | `ai-ml` |
 | React, Node, Full-Stack, MERN | `fullstack` |
+
+### Open Job-Search Tabs
+
+```bash
+./job_run.sh
+```
+
+The script opens the LinkedIn feed, your LinkedIn profile and your GitHub
+profile in Google Chrome. If Chrome is closed, the script starts it. The
+profile link comes from `LINKEDIN_URL` in `.env`. Each run opens new tabs.
 
 ---
 
